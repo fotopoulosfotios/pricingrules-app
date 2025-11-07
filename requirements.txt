@@ -1,0 +1,15 @@
+streamlit==1.38.0
+pdfminer.six==20240706
+mammoth==1.8.0
+pandas==2.2.2
+python-magic-bin==0.4.14; platform_system == "Windows"
+python-magic==0.4.27; platform_system != "Windows"
+python-docx==1.1.2
+mail-parser==4.1.4
+pyyaml==6.0.2
+beautifulsoup4==4.12.3
+openpyxl==3.1.5
+xlrd==1.2.0
+
+
+

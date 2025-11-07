@@ -1,0 +1,25 @@
+currency: EUR
+tolerance_pct: 1
+rules:
+  - code: R1
+    label: "Χρέωση ανά εντολή"
+    mode: per_item
+    value: 0.30
+    keywords: ["ανά εντολή", "per transaction", "incoming"]
+  - code: R2
+    label: "Ποσοστιαία χρέωση"
+    mode: percent
+    value: 0.001   # 0.1%
+    min: 2
+    max: 50
+    keywords: ["% επί ποσού", "ad valorem"]
+  - code: R3
+    label: "SWIFT μηνύματος"
+    mode: per_item
+    value: 5
+    keywords: ["swift", "pacs.", "camt.", "mt"]
+  - code: R4
+    label: "Πάγιο ανά μήνα"
+    mode: flat
+    value: 100
+    keywords: ["πάγιο", "monthly", "subscription"]
