@@ -1,11 +1,13 @@
 streamlit==1.38.0
-pdfminer.six==20221105
-mammoth==1.6.0
-pandas==2.2.2
-python-docx==1.1.2
-PyYAML==6.0.1
-beautifulsoup4==4.12.3
-mail-parser==3.15.0
+pdfminer.six
+mammoth
+pandas
+python-docx
+PyYAML
+beautifulsoup4
+mail-parser
+
+
 
 
 
