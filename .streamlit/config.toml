@@ -1,0 +1,26 @@
+# =====================================================
+# Streamlit Configuration File
+# Δημόσια προβολή + βασικές ρυθμίσεις παρουσίασης
+# =====================================================
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+port = 8501
+address = "0.0.0.0"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#0b7285"
+backgroundColor = "#f8f9fa"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#000000"
+font = "sans serif"
+
+# Δημόσια πρόσβαση (όλοι με το link)
+[global]
+sharingMode = "public"
+
