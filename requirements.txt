@@ -1,11 +1,14 @@
-streamlit==1.38.0
-pdfminer.six
-mammoth
+streamlit
 pandas
+openpyxl
+pdfminer.six
 python-docx
-PyYAML
-beautifulsoup4
 mail-parser
+extract-msg
+PyYAML
+chardet
+requests
+
 
 
 
