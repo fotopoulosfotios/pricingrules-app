@@ -1,25 +1,37 @@
-currency: EUR
-tolerance_pct: 1
 rules:
-  - code: R1
-    label: "Χρέωση ανά εντολή"
-    mode: per_item
-    value: 0.30
-    keywords: ["ανά εντολή", "per transaction", "incoming"]
-  - code: R2
-    label: "Ποσοστιαία χρέωση"
-    mode: percent
-    value: 0.001   # 0.1%
-    min: 2
-    max: 50
-    keywords: ["% επί ποσού", "ad valorem"]
-  - code: R3
-    label: "SWIFT μηνύματος"
-    mode: per_item
-    value: 5
-    keywords: ["swift", "pacs.", "camt.", "mt"]
-  - code: R4
-    label: "Πάγιο ανά μήνα"
-    mode: flat
-    value: 100
-    keywords: ["πάγιο", "monthly", "subscription"]
+  - id: R001
+    description: "Έλεγχος για έξοδα αποστολέα (OUR)"
+    condition:
+      field: "ChargeBearer"
+      equals: "OUR"
+    action: "Χρέωση αποστολέα για όλα τα έξοδα"
+
+  - id: R002
+    description: "Έλεγχος για έξοδα παραλήπτη (BEN)"
+    condition:
+      field: "ChargeBearer"
+      equals: "BEN"
+    action: "Χρέωση παραλήπτη για όλα τα έξοδα"
+
+  - id: R003
+    description: "Έλεγχος τύπου συναλλαγής και νομίσματος"
+    condition:
+      field: "Currency"
+      in: ["EUR", "USD"]
+    action: "Εφαρμογή κανόνων κόστους ανά νόμισμα"
+
+  - id: R004
+    description: "Ειδικός κανόνας για BIC CRBAGRAAXXX"
+    condition:
+      field: "BIC"
+      equals: "CRBAGRAAXXX"
+    action: "Πρόσθετη επιβάρυνση 0.10%"
+
+  - id: R005
+    description: "Έλεγχος ύψους ποσού"
+    condition:
+      field: "Amount"
+      greater_than: 10000
+    action: "Εφαρμογή premium handling fee"
+
+
