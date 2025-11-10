@@ -1,0 +1,30 @@
+# Rules file for UNCRITMMXXX
+# Κανόνες τιμολόγησης για UniCredit Italy
+
+bank_bic: UNCRITMMXXX
+currency: EUR
+
+rules:
+  - id: R1
+    description: "Ποσό εντολής έως 12.500 EUR"
+    conditions:
+      - field: amount
+        operator: "<="
+        value: 12500
+    charge: 3.00
+
+  - id: R2
+    description: "Ποσό εντολής έως 50.000 EUR"
+    conditions:
+      - field: amount
+        operator: "<="
+        value: 50000
+    charge: 4.50
+
+  - id: R3
+    description: "Ποσό εντολής πάνω από 50.000 EUR"
+    conditions:
+      - field: amount
+        operator: ">"
+        value: 50000
+    charge: 20.00
