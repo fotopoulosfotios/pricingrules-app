@@ -1,0 +1,38 @@
+# Rules file for HEBACY2NXXX
+# Κανόνες τιμολόγησης για Hellenic Bank Cyprus
+
+bank_bic: HEBACY2NXXX
+currency: EUR
+
+rules:
+  - id: R1
+    description: "Ποσό εντολής έως 1.000 EUR"
+    conditions:
+      - field: amount
+        operator: "<="
+        value: 1000
+    charge: 0.00
+
+  - id: R2
+    description: "Ποσό εντολής έως 10.000 EUR"
+    conditions:
+      - field: amount
+        operator: "<="
+        value: 10000
+    charge: 2.00
+
+  - id: R3
+    description: "Ποσό εντολής έως 50.000 EUR"
+    conditions:
+      - field: amount
+        operator: "<="
+        value: 50000
+    charge: 15.00
+
+  - id: R4
+    description: "Ποσό εντολής πάνω από 50.000 EUR"
+    conditions:
+      - field: amount
+        operator: ">"
+        value: 50000
+    charge: 30.00
