@@ -1,0 +1,24 @@
+rules:
+  - id: UNCR-1
+    description: Χρέωση έως 12.500 EUR
+    condition:
+      field: Amount
+      less_equal: 12500
+    action:
+      set_charge: 3.00
+
+  - id: UNCR-2
+    description: Χρέωση έως 50.000 EUR
+    condition:
+      field: Amount
+      less_equal: 50000
+    action:
+      set_charge: 4.50
+
+  - id: UNCR-3
+    description: Χρέωση πάνω από 50.000 EUR
+    condition:
+      field: Amount
+      greater_than: 50000
+    action:
+      set_charge: 20.00
