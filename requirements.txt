@@ -1,13 +1,12 @@
-streamlit
-pandas
-openpyxl
-pdfminer.six
-python-docx
-mail-parser
-extract-msg
-PyYAML
-chardet
-requests
+streamlit==1.38.0
+pdfminer.six==20221105
+mammoth==1.6.0
+pandas==2.2.2
+chardet==5.2.0
+python-docx==1.1.0
+fpdf==1.7.2
+
+
 
 
 
