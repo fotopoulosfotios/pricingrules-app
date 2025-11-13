@@ -5,70 +5,72 @@ import chardet
 from pdfminer.high_level import extract_text as pdf_extract_text
 from docx import Document
 
-# ---------------------------
-#  Ρυθμίσεις σελίδας
-# ---------------------------
+# ---------------------------------------------------------
+#  Ρυθμίσεις εφαρμογής
+# ---------------------------------------------------------
 st.set_page_config(page_title="Έλεγχος Τιμολογήσεων", page_icon="💶", layout="wide")
 st.title("💶 Σύστημα Ελέγχου Τιμολογήσεων Εισερχόμενων Εντολών")
 
-# ---------------------------
-#  Βοηθητικά: Κανόνες
-# ---------------------------
-def load_rules_from_path(path="rules_example.yaml"):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        return data.get("rules", [])
-    except Exception as e:
-        st.warning(f"Δεν βρέθηκαν προεπιλεγμένοι κανόνες ({path}): {e}")
-        return []
+# ---------------------------------------------------------
+#  Απαιτούμενες στήλες
+# ---------------------------------------------------------
+REQUIRED_COLS = ["BIC", "Currency", "Amount", "ChargedAmount"]
 
-def validate_rules(rules):
-    required = {"id", "description", "condition", "action"}
-    for i, r in enumerate(rules, start=1):
-        if not isinstance(r, dict):
-            return f"Κανόνας #{i} δεν είναι αντικείμενο."
-        missing = required - set(r.keys())
-        if missing:
-            return f"Κανόνας #{i} λείπει πεδία: {', '.join(missing)}"
-        if "field" not in (r.get("condition") or {}):
-            return f"Κανόνας #{i} λείπει condition.field"
-    return None
-
-# ---------------------------
-#  Βοηθητικά: Ονοματολογία πεδίων
-# ---------------------------
-REQUIRED_COLS = ["BIC", "Currency", "Amount", "ChargeBearer"]
-
+# Συνώνυμα για αυτόματο mapping
 SYNONYMS = {
     "bic": ["bic", "sender_bic", "bank_bic"],
     "currency": ["currency", "ccy", "curr"],
-    "amount": ["amount", "amt", "value", "sum"],
-    "chargebearer": ["chargebearer", "charge_bearer", "charge-bearer", "charges", "expenses_type"],
+    "amount": ["amount", "amt", "value"],
+    "chargedamount": ["chargedamount", "charged_amount", "fee", "charges", "pricing"],
 }
 
+# ---------------------------------------------------------
+#  Validate κανόνων YAML
+# ---------------------------------------------------------
+def validate_rules(rules):
+    required_fields = {"id", "description", "condition", "action"}
+
+    for r in rules:
+        if not isinstance(r, dict):
+            return "Κάποιος κανόνας δεν είναι αντικείμενο."
+
+        missing = required_fields - r.keys()
+        if missing:
+            return f"Λείπουν πεδία: {', '.join(missing)}"
+
+        if "field" not in r["condition"]:
+            return "Κάποιος κανόνας δεν έχει condition.field"
+
+        if "set_charge" not in r["action"]:
+            return "Κάποιος κανόνας δεν έχει action.set_charge"
+
+    return None
+
+# ---------------------------------------------------------
+#  Κανονικοποίηση στηλών
+# ---------------------------------------------------------
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    cols_map = {}
+    col_map = {}
     lower_cols = {c.lower(): c for c in df.columns}
+
     for target, alts in SYNONYMS.items():
-        for cand in alts:
-            if cand in lower_cols:
-                cols_map[lower_cols[cand]] = target.capitalize() if target != "chargebearer" else "ChargeBearer"
+        for a in alts:
+            if a in lower_cols:
+                col_map[lower_cols[a]] = target.capitalize() if target != "chargedamount" else "ChargedAmount"
                 break
-    # διατήρησε ό,τι ήδη ταιριάζει κανονικά
+
     for c in df.columns:
         if c in REQUIRED_COLS:
-            cols_map[c] = c
-    df = df.rename(columns=cols_map)
-    return df
+            col_map[c] = c
 
-def require_columns(df: pd.DataFrame):
-    missing = [c for c in REQUIRED_COLS if c not in df.columns]
-    return missing
+    return df.rename(columns=col_map)
 
-# ---------------------------
-#  Αναγνώστες αρχείων
-# ---------------------------
+def find_missing_columns(df: pd.DataFrame):
+    return [c for c in REQUIRED_COLS if c not in df.columns]
+
+# ---------------------------------------------------------
+#  Ανάγνωση αρχείων
+# ---------------------------------------------------------
 def read_csv_file(file) -> pd.DataFrame:
     raw = file.read()
     enc = chardet.detect(raw).get("encoding") or "utf-8"
@@ -80,272 +82,260 @@ def read_xlsx_file(file) -> pd.DataFrame:
 def read_json_file(file) -> pd.DataFrame:
     try:
         obj = json.load(file)
-    except Exception:
-        # αν είναι bytes
-        obj = json.loads(file.read().decode("utf-8"))
+    except:
+        obj = json.loads(file.read().decode("utf-8", errors="ignore"))
     if isinstance(obj, list):
         return pd.DataFrame(obj)
-    elif isinstance(obj, dict):
-        # προσπαθεί να βρει πίνακα
+    if isinstance(obj, dict):
         for v in obj.values():
-            if isinstance(v, list) and v and isinstance(v[0], dict):
+            if isinstance(v, list) and all(isinstance(x, dict) for x in v):
                 return pd.DataFrame(v)
         return pd.DataFrame([obj])
     return pd.DataFrame()
 
 def read_txt_file(file) -> pd.DataFrame:
-    # προσπαθεί διαχωρισμό με tab/;/
     raw = file.read()
     enc = chardet.detect(raw).get("encoding") or "utf-8"
     text = raw.decode(enc, errors="ignore")
-    # δοκίμασε πρώτα tab
-    if "\t" in text:
-        return pd.read_csv(io.StringIO(text), sep="\t")
-    # δοκίμασε ;
-    if ";" in text:
-        return pd.read_csv(io.StringIO(text), sep=";")
-    # fallback: space-split -> σε λίστα
-    rows = [re.split(r"\s{2,}|\s*,\s*|\s+", ln.strip()) for ln in text.splitlines() if ln.strip()]
-    maxlen = max((len(r) for r in rows), default=0)
-    rows = [r + [""]*(maxlen-len(r)) for r in rows]
+    rows = [re.split(r"[;,|\t]| {2,}", ln.strip()) for ln in text.splitlines() if ln.strip()]
     return pd.DataFrame(rows)
 
-def parse_table_from_text(text: str) -> pd.DataFrame:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # απλή εικασία: διάστημα/κόμμα/; ως διαχωριστές
-    rows = [re.split(r"\s{2,}|;|,|\t", ln) for ln in lines]
-    # αν η πρώτη γραμμή μοιάζει με header, χρησιμοποίησέ την
-    if rows:
-        header = [h.strip() for h in rows[0]]
-        body = rows[1:]
-        # αν τα header είναι πολύ «χαοτικά», φτιάξε generic
-        if any(len(h) == 0 for h in header) or len(set(header)) != len(header):
-            width = max(len(r) for r in rows)
-            cols = [f"Col{i+1}" for i in range(width)]
-            body = [r + [""]*(len(cols)-len(r)) for r in rows]
-            return pd.DataFrame(body, columns=cols)
-        else:
-            width = len(header)
-            body = [r + [""]*(width-len(r)) for r in body]
-            return pd.DataFrame(body, columns=header)
-    return pd.DataFrame()
-
 def read_pdf_file(file) -> pd.DataFrame:
-    # Προσπάθεια εξαγωγής text από PDF (όχι OCR)
     try:
         text = pdf_extract_text(file)
-    except Exception as e:
-        st.error(f"Αποτυχία ανάγνωσης PDF: {e}")
+        rows = [re.split(r"[;,|\t]| {2,}", ln.strip()) for ln in text.splitlines() if ln.strip()]
+        return pd.DataFrame(rows)
+    except Exception:
+        st.error("❌ Αποτυχία ανάγνωσης PDF")
         return pd.DataFrame()
-    df = parse_table_from_text(text)
-    return df
 
 def read_docx_file(file) -> pd.DataFrame:
-    # Προσπάθεια ανάγνωσης πινάκων DOCX
     byts = file.read()
     doc = Document(io.BytesIO(byts))
     tables = doc.tables
-    if tables:
-        tbl = tables[0]
-        data = []
-        for r in tbl.rows:
-            data.append([c.text.strip() for c in r.cells])
-        # θεώρησε 1η γραμμή ως header αν φαίνεται κατάλληλη
-        if data:
-            header = data[0]
-            if len(set(header)) == len(header) and all(h.strip() for h in header):
-                rows = data[1:]
-                rows = [r + [""]*(len(header)-len(r)) for r in rows]
-                return pd.DataFrame(rows, columns=header)
-        # αλλιώς generic
-        width = max((len(r) for r in data), default=0)
-        data = [r + [""]*(width-len(r)) for r in data]
-        return pd.DataFrame(data)
-    # fallback: παράγραφοι
-    paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-    return parse_table_from_text("\n".join(paras))
+    if not tables:
+        return pd.DataFrame()
+    tbl = tables[0]
+    rows = [[c.text.strip() for c in r.cells] for r in tbl.rows]
+    header = rows[0]
+    body = rows[1:]
+    df = pd.DataFrame(body, columns=header)
+    return df
 
-def read_eml_file(file) -> pd.DataFrame:
-    # mail-parser για .eml
-    from mailparser import MailParser
-    raw = file.read()
-    parser = MailParser()
-    parser.parse_from_bytes(raw)
-    # προτιμά text/plain
-    body = parser.text_plain[0] if parser.text_plain else (parser.body or "")
-    return parse_table_from_text(body)
-
-def read_msg_file(file) -> pd.DataFrame:
-    # extract-msg για .msg (Outlook)
-    import extract_msg
-    byts = file.read()
-    with open("_tmp_msg.msg", "wb") as f:
-        f.write(byts)
-    try:
-        msg = extract_msg.Message("_tmp_msg.msg")
-        body = (msg.body or "").strip()
-        return parse_table_from_text(body)
-    finally:
-        try:
-            os.remove("_tmp_msg.msg")
-        except Exception:
-            pass
-
-# Προαιρετικό OCR μέσω OCR.space (αν υπάρχει API key σε secrets)
-def read_with_ocr_if_possible(file_bytes: bytes, filename: str) -> pd.DataFrame:
+# ---------------------------------------------------------
+#  OCR (προαιρετικό)
+# ---------------------------------------------------------
+def read_scanned_pdf_with_ocr(file_bytes, filename):
     api_key = st.secrets.get("OCRSPACE_API_KEY", None)
     if not api_key:
-        st.info("🔍 Το αρχείο φαίνεται σκαναρισμένο/εικόνα. "
-                "Για αυτόματο OCR πρόσθεσε OCRSPACE_API_KEY στα Streamlit secrets.")
+        st.warning("🔍 Το PDF ίσως είναι σκαναρισμένο. Προσθέστε OCR API key στα secrets.")
         return pd.DataFrame()
+
+    import requests
+    files = {"file": (filename, io.BytesIO(file_bytes))}
+    data = {"apikey": api_key, "language": "eng"}
+
     try:
-        import requests
-        files = {"file": (filename, io.BytesIO(file_bytes))}
-        data = {"apikey": api_key, "language": "eng"}
-        r = requests.post("https://api.ocr.space/parse/image", files=files, data=data, timeout=60)
+        r = requests.post("https://api.ocr.space/parse/image", files=files, data=data)
         js = r.json()
-        text = "\n".join([p.get("ParsedText", "") for p in js.get("ParsedResults", [])])
-        return parse_table_from_text(text)
+        text = "\n".join([p["ParsedText"] for p in js.get("ParsedResults", [])])
+        rows = [re.split(r"[;,|\t]| {2,}", ln.strip()) for ln in text.splitlines() if ln.strip()]
+        return pd.DataFrame(rows)
     except Exception as e:
-        st.error(f"OCR αποτυχία: {e}")
+        st.error(f"❌ OCR Error: {e}")
         return pd.DataFrame()
 
-def detect_scanned_pdf_need_ocr(df: pd.DataFrame) -> bool:
-    # χονδρική ένδειξη: PDF έβγαλε πολύ λίγο/άχρηστο κείμενο
-    return df.empty or (df.shape[1] <= 2 and df.shape[0] <= 3)
+# ---------------------------------------------------------
+#  Φόρτωμα αρχείου εντολών
+# ---------------------------------------------------------
+def load_uploaded_file(file):
+    name = file.name.lower()
 
-# ---------------------------
+    if name.endswith(".csv"):
+        return read_csv_file(file)
+    if name.endswith(".xlsx"):
+        return read_xlsx_file(file)
+    if name.endswith(".json"):
+        return read_json_file(file)
+    if name.endswith(".txt"):
+        return read_txt_file(file)
+    if name.endswith(".pdf"):
+        df = read_pdf_file(file)
+        if df.empty or len(df.columns) <= 2:
+            file.seek(0)
+            df = read_scanned_pdf_with_ocr(file.read(), file.name)
+        return df
+    if name.endswith(".docx"):
+        return read_docx_file(file)
+
+    st.error("❌ Μη υποστηριζόμενος τύπος αρχείου.")
+    return pd.DataFrame()
+
+# ---------------------------------------------------------
 #  Εφαρμογή κανόνων
-# ---------------------------
+# ---------------------------------------------------------
 def apply_rules(df: pd.DataFrame, rules):
-    out = []
+    output = []
+
     for i, row in df.iterrows():
-        matched = []
+        rule_applied = None
+        charge = 0.0
+
         for rule in rules:
             cond = rule["condition"]
             field = cond.get("field")
-            val = row.get(field)
+            if field != "Amount":
+                continue
+
             try:
-                if "equals" in cond and str(val) == str(cond["equals"]):
-                    matched.append(rule["id"])
-                elif "in" in cond and str(val) in [str(x) for x in cond["in"]]:
-                    matched.append(rule["id"])
-                elif "greater_than" in cond and float(val) > float(cond["greater_than"]):
-                    matched.append(rule["id"])
-            except Exception:
-                pass
-        out.append({
-            "Index": i+1,
+                amount = float(row.get("Amount", 0))
+            except:
+                amount = 0
+
+            matched = False
+
+            if "less_equal" in cond and amount <= cond["less_equal"]:
+                matched = True
+            elif "between" in cond:
+                lo, hi = cond["between"]
+                if lo <= amount <= hi:
+                    matched = True
+            elif "greater_than" in cond and amount > cond["greater_than"]:
+                matched = True
+
+            if matched:
+                charge = rule["action"]["set_charge"]
+                rule_applied = rule["id"]
+                break
+
+        try:
+            charged_actual = float(row.get("ChargedAmount", 0))
+        except:
+            charged_actual = 0.0
+
+        diff = charged_actual - charge
+
+        output.append({
             "BIC": row.get("BIC", ""),
             "Currency": row.get("Currency", ""),
             "Amount": row.get("Amount", ""),
-            "ChargeBearer": row.get("ChargeBearer", ""),
-            "MatchedRules": ", ".join(matched) if matched else "—"
+            "ChargedAmount": charged_actual,
+            "ExpectedCharge": charge,
+            "Difference": diff,
+            "RuleApplied": rule_applied or "—"
         })
-    return pd.DataFrame(out)
 
-# ---------------------------
-#  Sidebar: Κανόνες
-# ---------------------------
-st.sidebar.header("⚙️ Κανόνες")
+    return pd.DataFrame(output)
+
+# ---------------------------------------------------------
+#  Sidebar — Αρχείο κανόνων
+# ---------------------------------------------------------
+st.sidebar.header("⚙️ Αρχείο Κανόνων")
 rules_file = st.sidebar.file_uploader("Ανέβασε YAML κανόνων", type=["yaml", "yml"])
+
 if rules_file:
     try:
-        rules = (yaml.safe_load(rules_file) or {}).get("rules", [])
-        msg = validate_rules(rules)
-        if msg:
-            st.sidebar.error(f"❌ Σφάλμα κανόνων: {msg}")
+        y = yaml.safe_load(rules_file)
+        rules = y.get("rules", [])
+        err = validate_rules(rules)
+        if err:
+            st.sidebar.error(f"❌ Σφάλμα στους κανόνες: {err}")
             rules = []
         else:
             st.sidebar.success("✅ Κανόνες φορτώθηκαν.")
     except Exception as e:
-        st.sidebar.error(f"Μη έγκυρο YAML: {e}")
+        st.sidebar.error(f"❌ Μη έγκυρο YAML: {e}")
         rules = []
 else:
-    rules = load_rules_from_path()
-    if rules:
-        st.sidebar.info("Χρήση προεπιλεγμένων κανόνων (rules_example.yaml)")
-    else:
-        st.sidebar.warning("Δεν βρέθηκαν κανόνες.")
+    rules = []
+    st.sidebar.info("🔹 Ανέβασε YAML κανόνων για να γίνει έλεγχος.")
 
-# ---------------------------
-#  Αρχείο εντολών
-# ---------------------------
-st.subheader("📂 Ανέβασε τιμολογημένες εντολές")
-uploaded = st.file_uploader(
-    "Υποστηριζόμενα: CSV, XLSX, PDF (text), DOCX, EML, MSG, TXT, JSON. Για σκαναρισμένα: δείτε OCR σημείωση.",
-    type=["csv", "xlsx", "pdf", "docx", "eml", "msg", "txt", "json"]
+# ---------------------------------------------------------
+#  Upload αρχείου τιμολογημένων εντολών
+# ---------------------------------------------------------
+st.header("📂 Ανέβασε Αρχείο Τιμολογημένων Εντολών")
+
+uploaded_file = st.file_uploader(
+    "Υποστηριζόμενα: CSV, XLSX, PDF, DOCX, TXT, JSON",
+    type=["csv", "xlsx", "pdf", "docx", "txt", "json"]
 )
 
 df = pd.DataFrame()
-if uploaded:
-    name = uploaded.name.lower()
-    try:
-        if name.endswith(".csv"):
-            df = read_csv_file(uploaded)
-        elif name.endswith(".xlsx"):
-            df = read_xlsx_file(uploaded)
-        elif name.endswith(".json"):
-            df = read_json_file(uploaded)
-        elif name.endswith(".txt"):
-            df = read_txt_file(uploaded)
-        elif name.endswith(".pdf"):
-            df = read_pdf_file(uploaded)
-            # αν μοιάζει σκαναρισμένο, προσπάθησε OCR αν υπάρχει API key
-            if detect_scanned_pdf_need_ocr(df):
-                uploaded.seek(0)
-                byts = uploaded.read()
-                df = read_with_ocr_if_possible(byts, uploaded.name)
-        elif name.endswith(".docx"):
-            df = read_docx_file(uploaded)
-        elif name.endswith(".eml"):
-            df = read_eml_file(uploaded)
-        elif name.endswith(".msg"):
-            df = read_msg_file(uploaded)
-        else:
-            st.error("Μη υποστηριζόμενος τύπος αρχείου.")
-            df = pd.DataFrame()
-    except Exception as e:
-        st.error(f"❌ Σφάλμα ανάγνωσης αρχείου: {e}")
-        df = pd.DataFrame()
 
-    if not df.empty:
-        df = normalize_columns(df)
+if uploaded_file:
+    df = load_uploaded_file(uploaded_file)
+
+    if df.empty:
+        st.error("❌ Δεν βρέθηκαν δεδομένα.")
+    else:
         st.success(f"✅ Φορτώθηκαν {len(df)} γραμμές.")
+        st.subheader("📄 Προεπισκόπηση")
         st.dataframe(df.head(50), use_container_width=True)
 
-        missing = require_columns(df)
+        df = normalize_columns(df)
+
+        missing = find_missing_columns(df)
         if missing:
-            st.warning(f"⚠️ Λείπουν απαιτούμενες στήλες: {', '.join(missing)}")
-            st.info("Μπορείς να μετονομάσεις στήλες στο αρχείο σου σε: "
-                    "'BIC', 'Currency', 'Amount', 'ChargeBearer' ή αντίστοιχα συνώνυμα.")
+            st.error(f"❌ Λείπουν στήλες: {', '.join(missing)}")
         else:
-            st.subheader("📊 Αποτελέσματα Ελέγχου")
-            if rules:
+            if not rules:
+                st.warning("⚠️ Δεν υπάρχουν κανόνες.")
+            else:
+                st.header("📊 Αποτελέσματα Ελέγχου")
                 result = apply_rules(df, rules)
                 st.dataframe(result, use_container_width=True)
-                # Στατιστικά
+
                 st.subheader("📈 Στατιστικά")
-                vc = result["MatchedRules"].value_counts().reset_index()
-                vc.columns = ["Κανόνας/Κατάσταση", "Πλήθος"]
-                st.table(vc)
+                total_diff = result["Difference"].sum()
+                ok = (result["Difference"] == 0).sum()
+                wrong = (result["Difference"] != 0).sum()
 
-                # Λήψη Excel
-                out = io.BytesIO()
-                result.to_excel(out, index=False)
-                st.download_button(
-                    "📥 Λήψη Αποτελεσμάτων (Excel)",
-                    out.getvalue(),
-                    "audit_results.xlsx",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                st.metric("✔️ Σωστά", ok)
+                st.metric("❌ Λάθος", wrong)
+                st.metric("Σύνολο Απόκλισης", total_diff)
+
+                st.table(
+                    result["RuleApplied"].value_counts().reset_index().rename(
+                        columns={"index": "Rule", "RuleApplied": "Count"}
+                    )
                 )
-            else:
-                st.error("Δεν υπάρχουν ενεργοί κανόνες για εφαρμογή.")
-    else:
-        st.warning("Δεν προέκυψαν δεδομένα από το αρχείο.")
 
-else:
-    st.info("➡️ Ανέβασε ένα αρχείο για έλεγχο.")
+                # ---------------------------------------------------------
+                #  Exports
+                # ---------------------------------------------------------
+                st.subheader("📥 Λήψη Αποτελεσμάτων")
+
+                # Excel
+                out_xlsx = io.BytesIO()
+                result.to_excel(out_xlsx, index=False)
+                st.download_button(
+                    "📥 Λήψη Excel",
+                    out_xlsx.getvalue(),
+                    "audit_results.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+                # PDF
+                try:
+                    from fpdf import FPDF
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.set_font("Arial", size=10)
+
+                    for _, row in result.iterrows():
+                        line = f"{row['BIC']} | {row['Amount']} | Charged={row['ChargedAmount']} | Expected={row['ExpectedCharge']} | Diff={row['Difference']}"
+                        pdf.cell(0, 5, txt=line, ln=1)
+
+                    out_pdf = io.BytesIO(pdf.output(dest="S").encode("latin1"))
+
+                    st.download_button(
+                        "📥 Λήψη PDF",
+                        out_pdf.getvalue(),
+                        "audit_results.pdf",
+                        "application/pdf"
+                    )
+                except:
+                    st.info("Προσθέστε στο requirements: fpdf==1.7.2")
 
 st.markdown("---")
-st.caption("© 2025 Σύστημα Ελέγχου Τιμολογήσεων | CRBAGRAAXXX — Υποστήριξη αρχείων: CSV, XLSX, PDF(text), DOCX, EML, MSG, TXT, JSON. Προαιρετικό OCR με API.")
+st.caption("© 2025 Σύστημα Ελέγχου Τιμολογήσεων — Υποστήριξη αρχείων: CSV, XLSX, PDF(text), DOCX, TXT, JSON.")
